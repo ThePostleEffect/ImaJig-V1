@@ -1,0 +1,206 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "DM Sans", sans-serif;
+  --font-heading: "Space Grotesk", sans-serif;
+
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  /* Neo-Brutalism / Pop Art Palette */
+  --primary: #2D5BFF; /* Electric Blue */
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #FFD600; /* Vibrant Yellow */
+  --secondary-foreground: #000000;
+  
+  --background: #F0F0F0; /* Off-white */
+  --foreground: #000000; /* Stark Black */
+  
+  --card: #FFFFFF;
+  --card-foreground: #000000;
+  
+  --popover: #FFFFFF;
+  --popover-foreground: #000000;
+  
+  --muted: #E0E0E0;
+  --muted-foreground: #666666;
+  
+  --accent: #FFD600;
+  --accent-foreground: #000000;
+  
+  --destructive: #FF3333;
+  --destructive-foreground: #FFFFFF;
+  
+  --border: #000000; /* Thick black borders */
+  --input: #FFFFFF;
+  --ring: #2D5BFF;
+  
+  --radius: 0px; /* Hard edges */
+
+  --chart-1: #2D5BFF;
+  --chart-2: #FFD600;
+  --chart-3: #FF3333;
+  --chart-4: #00C853;
+  --chart-5: #AA00FF;
+
+  --sidebar: #FFFFFF;
+  --sidebar-foreground: #000000;
+  --sidebar-primary: #2D5BFF;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFD600;
+  --sidebar-accent-foreground: #000000;
+  --sidebar-border: #000000;
+  --sidebar-ring: #2D5BFF;
+}
+
+.dark {
+  /* Dark mode adaptation - keeping high contrast */
+  --background: #121212;
+  --foreground: #FFFFFF;
+  
+  --card: #1E1E1E;
+  --card-foreground: #FFFFFF;
+  
+  --popover: #1E1E1E;
+  --popover-foreground: #FFFFFF;
+  
+  --primary: #4D7BFF;
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #FFD600;
+  --secondary-foreground: #000000;
+  
+  --muted: #333333;
+  --muted-foreground: #AAAAAA;
+  
+  --accent: #FFD600;
+  --accent-foreground: #000000;
+  
+  --destructive: #FF5555;
+  --destructive-foreground: #FFFFFF;
+  
+  --border: #FFFFFF;
+  --input: #333333;
+  --ring: #4D7BFF;
+  
+  --sidebar: #1E1E1E;
+  --sidebar-foreground: #FFFFFF;
+  --sidebar-primary: #4D7BFF;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFD600;
+  --sidebar-accent-foreground: #000000;
+  --sidebar-border: #FFFFFF;
+  --sidebar-ring: #4D7BFF;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    background-image: radial-gradient(#000000 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-opacity: 0.1;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading font-bold uppercase tracking-tight;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  a[href],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    @apply cursor-pointer;
+  }
+}
+
+@layer components {
+  .container {
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .flex {
+    min-height: 0;
+    min-width: 0;
+  }
+  
+  /* Neo-Brutalism specific components */
+  .neo-card {
+    @apply bg-card border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)];
+  }
+  
+  .neo-btn {
+    @apply bg-primary text-primary-foreground font-bold uppercase border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all;
+  }
+  
+  .neo-btn-secondary {
+    @apply bg-secondary text-secondary-foreground font-bold uppercase border-2 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all;
+  }
+
+  @media (min-width: 640px) {
+    .container {
+      padding-left: 1.5rem;
+      padding-right: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .container {
+      padding-left: 2rem;
+      padding-right: 2rem;
+      max-width: 1280px;
+    }
+  }
+}
