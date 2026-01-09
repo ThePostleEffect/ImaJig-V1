@@ -8,9 +8,8 @@ import { GameState, Piece, Point, PuzzleConfig } from '../engine/types';
 import { UnionFind } from '../engine/unionFind';
 import { SpatialHash } from '../engine/spatialHash';
 import { AudioManager } from '../engine/audio';
-import { ValidationPanel } from './ValidationPanel';
-import { ValidationResult, validatePuzzle } from '../engine/validator';
 import { DebugOverlay } from './DebugOverlay';
+import { preloadSfx, playPlacementSfx, playCelebrationSfx, unlockSfx } from '../audio/sfx';
 
 interface PuzzleBoardProps {
   config: PuzzleConfig;
@@ -33,19 +32,26 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
   const [showSettings, setShowSettings] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [audioManager] = useState(() => new AudioManager());
-  const [snapGlow, setSnapGlow] = useState<{x: number, y: number} | null>(null);
   const [background, setBackground] = useState<'felt' | 'dark' | 'wood' | 'blue'>('felt');
   const [showGhost, setShowGhost] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
-  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const sfxUnlockedRef = useRef(false);
 
   const draggingRef = useRef<{
     pieceId: string;
     startScreenPos: { x: number, y: number };
     startPiecePos: { x: number, y: number, rotation: number };
     groupOffsets: Record<string, Point>;
+    targetPositions: Record<string, Point>; // Target positions for smoothing
+    startTime: number; // For two-phase alpha timing
   } | null>(null);
+
+  const animationFrameRef = useRef<number>();
+  const smoothingAlpha = 0.22; // Normal smoothing factor
+  const fastAlpha = 0.35; // Fast catch-up alpha for first 120ms
+  const fastPhaseMs = 120; // Duration of fast alpha phase
+  const initializedRef = useRef(false); // Guard against double initialization (React StrictMode)
 
   const bgStyles = {
     felt: { backgroundColor: '#2a2a2a', backgroundImage: 'radial-gradient(#333 1px, transparent 1px)', backgroundSize: '20px 20px' },
@@ -57,6 +63,24 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
   // Initialize
   useEffect(() => {
     if (!canvasRef.current) return;
+    
+    // Guard against React StrictMode double-mount
+    if (initializedRef.current) {
+      console.warn('[PuzzleBoard] Skipping duplicate initialization (StrictMode)');
+      return;
+    }
+    initializedRef.current = true;
+
+    // Unlock Web Audio + preload SFX on first user gesture (exactly once)
+    const el = canvasRef.current;
+    const unlockOnce = () => {
+      if (sfxUnlockedRef.current) return;
+      sfxUnlockedRef.current = true;
+      unlockSfx().finally(() => {
+        preloadSfx();
+      });
+    };
+    el.addEventListener('pointerdown', unlockOnce, { once: true });
 
     // Setup renderer
     rendererRef.current = new PuzzleRenderer(canvasRef.current);
@@ -96,13 +120,59 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
         gameStateRef.current = await generator.generate(config);
         unionFindRef.current = new UnionFind(Object.keys(gameStateRef.current.pieces));
         
-        // Center camera (Camera x,y is top-left)
-        const cx = config.image.width / 2;
-        const cy = config.image.height / 2;
-        cameraRef.current.x = cx - window.innerWidth / 2;
-        cameraRef.current.y = cy - window.innerHeight / 2;
+        // === DEV VALIDATION: Check puzzle generation invariants ===
+        if (process.env.NODE_ENV === 'development') {
+          const pieces = Object.values(gameStateRef.current.pieces);
+          const expectedCount = config.rows * config.cols;
+          console.log(`[PuzzleBoard] Generated ${pieces.length} pieces (expected ${expectedCount})`);
+          
+          // Check for duplicate IDs
+          const idSet = new Set<string>();
+          const duplicateIds: string[] = [];
+          pieces.forEach(p => {
+            if (idSet.has(p.id)) duplicateIds.push(p.id);
+            idSet.add(p.id);
+          });
+          if (duplicateIds.length > 0) {
+            console.error('[PuzzleBoard] DUPLICATE IDs found:', duplicateIds);
+          }
+          
+          // Check for duplicate (row, col) from id
+          const posSet = new Set<string>();
+          const duplicatePos: string[] = [];
+          pieces.forEach(p => {
+            const pos = p.id; // IDs are piece_r_c
+            if (posSet.has(pos)) duplicatePos.push(pos);
+            posSet.add(pos);
+          });
+          if (duplicatePos.length > 0) {
+            console.error('[PuzzleBoard] DUPLICATE positions found:', duplicatePos);
+          }
+          
+          // Check neighbor edge consistency
+          let edgeIssues = 0;
+          pieces.forEach(p => {
+            p.neighbors.forEach(n => {
+              const neighbor = gameStateRef.current!.pieces[n.otherId];
+              if (!neighbor) {
+                console.error(`[PuzzleBoard] Missing neighbor ${n.otherId} for piece ${p.id}`);
+                edgeIssues++;
+              } else {
+                const reverseNeighbor = neighbor.neighbors.find(nn => nn.otherId === p.id);
+                if (!reverseNeighbor) {
+                  console.error(`[PuzzleBoard] ${p.id} has neighbor ${n.otherId}, but reverse link missing`);
+                  edgeIssues++;
+                }
+              }
+            });
+          });
+          if (edgeIssues === 0) {
+            console.log('[PuzzleBoard] ✓ All neighbor links valid');
+          }
+        }
+        // === END VALIDATION ===
         
-        // Initial shuffle
+        // Initial shuffle - scatter pieces around the puzzle area
         const boardW = config.image.width * 1.5;
         const boardH = config.image.height * 1.5;
         Object.values(gameStateRef.current.pieces).forEach(p => {
@@ -112,6 +182,42 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
             p.currentPose.rotation = Math.floor(Math.random() * 4) * (Math.PI / 2);
           }
         });
+        
+        // Calculate bounding box of all scattered pieces
+        const pieces = Object.values(gameStateRef.current.pieces);
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const p of pieces) {
+          // Estimate piece bounds (use centroid +/- half piece size)
+          const halfW = config.image.width / config.cols / 2 + 30; // Add padding for tabs
+          const halfH = config.image.height / config.rows / 2 + 30;
+          minX = Math.min(minX, p.currentPose.x - halfW);
+          minY = Math.min(minY, p.currentPose.y - halfH);
+          maxX = Math.max(maxX, p.currentPose.x + halfW);
+          maxY = Math.max(maxY, p.currentPose.y + halfH);
+        }
+        
+        // Add margin around the bounding box
+        const margin = 50;
+        minX -= margin;
+        minY -= margin;
+        maxX += margin;
+        maxY += margin;
+        
+        // Calculate zoom to fit all pieces on screen
+        const boundsW = maxX - minX;
+        const boundsH = maxY - minY;
+        const screenW = window.innerWidth;
+        const screenH = window.innerHeight;
+        const zoomToFitW = screenW / boundsW;
+        const zoomToFitH = screenH / boundsH;
+        const initialZoom = Math.min(zoomToFitW, zoomToFitH, 1); // Cap at 1x to avoid zooming in too much
+        
+        // Center camera on the middle of scattered pieces
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        cameraRef.current.zoom = Math.max(0.2, initialZoom); // Ensure minimum zoom
+        cameraRef.current.x = centerX - screenW / 2 / cameraRef.current.zoom;
+        cameraRef.current.y = centerY - screenH / 2 / cameraRef.current.zoom;
       }
 
       // Build Spatial Hash
@@ -124,19 +230,26 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
     initGame();
 
     // Start Loop
-    requestAnimationFrame(loop);
+    animationFrameRef.current = requestAnimationFrame(loop);
 
     // Resize handler
     const handleResize = () => {
-      if (canvasRef.current) {
-        canvasRef.current.width = window.innerWidth;
-        canvasRef.current.height = window.innerHeight;
+      if (canvasRef.current && rendererRef.current) {
+        rendererRef.current.resize(window.innerWidth, window.innerHeight);
       }
     };
     window.addEventListener('resize', handleResize);
     handleResize();
 
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      el.removeEventListener('pointerdown', unlockOnce);
+      if (animationFrameRef.current !== undefined) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      // Reset initialization flag on cleanup so remounting works correctly
+      initializedRef.current = false;
+    };
   }, []);
 
   // Helper to check snap between two pieces
@@ -190,8 +303,8 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
           return { 
             snapped: true, 
             targetPose: { 
-              x: Math.round(targetX), 
-              y: Math.round(targetY), 
+              x: targetX, 
+              y: targetY, 
               rotation: targetRot 
             }, 
             targetPieceId: p2.id 
@@ -217,7 +330,7 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
       spread: 70,
       origin: { y: 0.6 }
     });
-    if (soundEnabled) audioManager.playSnap();
+    if (soundEnabled) playCelebrationSfx(0.8);
 
     // 3. Auto-center/Polish
     const pieces = Object.values(gameStateRef.current.pieces);
@@ -258,12 +371,30 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
   // Local state wrapper for isComplete
   const [isComplete, setIsComplete] = useState(false);
 
-  // Game Loop
+  // Game Loop with drag smoothing
   const loop = () => {
     if (!gameStateRef.current || !rendererRef.current) return;
     
+    // Apply drag smoothing if actively dragging
+    if (draggingRef.current && draggingRef.current.targetPositions) {
+      const elapsed = Date.now() - draggingRef.current.startTime;
+      const alpha = elapsed < fastPhaseMs ? fastAlpha : smoothingAlpha;
+      
+      Object.entries(draggingRef.current.targetPositions).forEach(([id, target]) => {
+        const piece = gameStateRef.current!.pieces[id];
+        const current = piece.currentPose;
+        
+        // Smooth interpolation with two-phase alpha
+        const dx = target.x - current.x;
+        const dy = target.y - current.y;
+        
+        current.x += dx * alpha;
+        current.y += dy * alpha;
+      });
+    }
+    
     rendererRef.current.render(gameStateRef.current, cameraRef.current, draggingRef.current?.pieceId);
-    requestAnimationFrame(loop);
+    animationFrameRef.current = requestAnimationFrame(loop);
   };
 
   // Timer
@@ -318,34 +449,53 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
           });
 
           const offsets: Record<string, Point> = {};
+          const targetPositions: Record<string, Point> = {};
           groupIds.forEach(id => {
             const p = gameStateRef.current!.pieces[id];
             offsets[id] = {
               x: p.currentPose.x - worldPos.x,
               y: p.currentPose.y - worldPos.y
             };
+            // Initialize target positions to current positions (no initial jump)
+            targetPositions[id] = { x: p.currentPose.x, y: p.currentPose.y };
           });
 
           draggingRef.current = {
             pieceId: hitPiece.id,
             startScreenPos: { x, y },
             startPiecePos: { ...hitPiece.currentPose },
-            groupOffsets: offsets
+            groupOffsets: offsets,
+            targetPositions: targetPositions,
+            startTime: Date.now()
           };
+          
+          // Enable pointer capture for smoother dragging
+          if (event?.target && 'setPointerCapture' in event.target && event.pointerId !== undefined) {
+            (event.target as Element).setPointerCapture(event.pointerId);
+          }
         } else {
           cameraRef.current.pan(dx, dy);
         }
       } else if (draggingRef.current) {
+        // Update target positions for smooth interpolation
         Object.entries(draggingRef.current.groupOffsets).forEach(([id, offset]) => {
-          const p = gameStateRef.current!.pieces[id];
-          p.currentPose.x = worldPos.x + offset.x;
-          p.currentPose.y = worldPos.y + offset.y;
+          draggingRef.current!.targetPositions[id] = {
+            x: worldPos.x + offset.x,
+            y: worldPos.y + offset.y
+          };
         });
       } else {
         cameraRef.current.pan(dx, dy);
       }
 
       if (last && draggingRef.current) {
+        // First, snap pieces to final target positions (no more smoothing drift)
+        Object.entries(draggingRef.current.targetPositions).forEach(([id, target]) => {
+          const piece = gameStateRef.current!.pieces[id];
+          piece.currentPose.x = target.x;
+          piece.currentPose.y = target.y;
+        });
+        
         const draggedId = draggingRef.current.pieceId;
         const rootId = unionFindRef.current!.find(draggedId);
         
@@ -401,14 +551,17 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
             groupPieces.forEach(gp => {
               gp.currentPose.x += dx;
               gp.currentPose.y += dy;
-              gp.currentPose.x = Math.round(gp.currentPose.x);
-              gp.currentPose.y = Math.round(gp.currentPose.y);
               if (Math.abs(gp.currentPose.rotation) < 0.1) {
                 gp.currentPose.rotation = 0;
               }
             });
-            
-            audioManager.playSnap();
+
+            // Trigger blue glow effect on all pieces in the group
+            if (rendererRef.current) {
+              rendererRef.current.triggerSnapGlowGroup(groupPieces.map(gp => gp.id));
+            }
+
+            if (soundEnabled) playPlacementSfx(0.7);
             snapped = true;
             break;
           }
@@ -437,15 +590,15 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
                     gp.currentPose.x += dx;
                     gp.currentPose.y += dy;
                     gp.currentPose.rotation += dRot;
-                    gp.currentPose.x = Math.round(gp.currentPose.x);
-                    gp.currentPose.y = Math.round(gp.currentPose.y);
                   });
 
-                  const screenPos = cameraRef.current.worldToScreen(p.currentPose.x, p.currentPose.y);
-                  setSnapGlow(screenPos);
-                  setTimeout(() => setSnapGlow(null), 300);
-                  
-                  audioManager.playSnap();
+                  // Trigger blue glow effect on snapping pieces
+                  if (rendererRef.current) {
+                    rendererRef.current.triggerSnapGlow(p.id);
+                    rendererRef.current.triggerSnapGlow(result.targetPieceId!);
+                  }
+
+                  if (soundEnabled) playPlacementSfx(0.7);
                   snapped = true;
                 }
 
@@ -546,17 +699,6 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
         }}
       />
 
-      {snapGlow && (
-        <div 
-          className="absolute w-32 h-32 rounded-full bg-white/50 blur-xl pointer-events-none animate-pulse"
-          style={{ 
-            left: snapGlow.x - 64, 
-            top: snapGlow.y - 64,
-            zIndex: 10
-          }}
-        />
-      )}
-
       {debugMode && gameStateRef.current && (
         <DebugOverlay 
           gameState={gameStateRef.current} 
@@ -567,23 +709,6 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
       )}
 
       <div className="absolute top-4 left-4 flex flex-col gap-2 pointer-events-none">
-        <div className="pointer-events-auto mb-2">
-          <ValidationPanel 
-            result={validationResult} 
-            onValidate={() => {
-              if (!gameStateRef.current) return;
-              const res = validatePuzzle(
-                gameStateRef.current,
-                config.rows,
-                config.cols,
-                config.image.width,
-                config.image.height
-              );
-              setValidationResult(res);
-            }}
-          />
-        </div>
-        
         <div className="neo-card p-4 bg-white pointer-events-auto w-64">
           <div className="flex justify-between items-center mb-2">
             <h2 className="text-xl font-bold">ImaJig</h2>

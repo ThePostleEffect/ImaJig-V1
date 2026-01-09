@@ -163,6 +163,32 @@
 }
 
 @layer components {
+  /* Home screen only: warm table background (gameplay remains unchanged) */
+  .imajig-home {
+    position: relative;
+    background-image: url("/backgrounds/warm-table.png");
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
+  .imajig-home::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    /* Subtle warm tint + slight vignette for readability */
+    background:
+      radial-gradient(ellipse at center, rgba(0, 0, 0, 0.00) 55%, rgba(0, 0, 0, 0.18) 100%),
+      linear-gradient(180deg, rgba(255, 241, 224, 0.18), rgba(255, 241, 224, 0.06));
+  }
+
+  .imajig-home > * {
+    position: relative;
+    z-index: 1;
+  }
+
   .container {
     width: 100%;
     margin-left: auto;

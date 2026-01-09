@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 import { PuzzleConfig, GameState } from '../engine/types';
-import { savePuzzle, listPuzzles, loadPuzzle, SavedPuzzle, deletePuzzle } from '../storage/db';
-import { Trash2, Play, Upload, Image as ImageIcon } from 'lucide-react';
+import { savePuzzle, listPuzzles, loadPuzzle, SavedPuzzle, deletePuzzle, getLastPuzzle, calculateProgress, formatLastPlayed } from '../storage/db';
+import { Trash2, Play, Upload, Image as ImageIcon, HelpCircle } from 'lucide-react';
 
-export default function Home() {
+export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => void }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [config, setConfig] = useState<PuzzleConfig | null>(null);
   const [savedPuzzles, setSavedPuzzles] = useState<SavedPuzzle[]>([]);
+  const [lastPuzzle, setLastPuzzle] = useState<SavedPuzzle | null>(null);
   const [activePuzzleId, setActivePuzzleId] = useState<number | undefined>(undefined);
   
   // Config State
@@ -41,7 +42,10 @@ export default function Home() {
 
   const loadSavedPuzzles = async () => {
     const list = await listPuzzles();
-    setSavedPuzzles(list);
+    setSavedPuzzles(list.slice(0, 12)); // Limit to 12 most recent
+    
+    const last = await getLastPuzzle();
+    setLastPuzzle(last);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,15 +136,27 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F0F0F0] p-4 md:p-8 font-sans text-foreground">
+    <div className="imajig-home min-h-screen bg-[#F0F0F0] p-4 md:p-8 font-sans text-foreground">
       <div className="max-w-6xl mx-auto">
-        <header className="mb-12 flex items-center gap-4">
-          <div className="w-16 h-16 bg-primary border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center justify-center">
-            <div className="w-8 h-8 bg-secondary rounded-full" />
+        <header className="mb-12 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-16 h-16 bg-primary border-4 border-black shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] flex items-center justify-center">
+              <div className="w-8 h-8 bg-secondary rounded-full" />
+            </div>
+            <h1 className="text-6xl font-black uppercase tracking-tighter" style={{ textShadow: '4px 4px 0px rgba(0,0,0,0.2)' }}>
+              ImaJig
+            </h1>
           </div>
-          <h1 className="text-6xl font-black uppercase tracking-tighter" style={{ textShadow: '4px 4px 0px rgba(0,0,0,0.2)' }}>
-            ImaJig
-          </h1>
+          
+          {/* Tutorial Button */}
+          <button
+            onClick={onReplayTutorial}
+            className="flex items-center gap-2 px-4 py-2 bg-white border-2 border-black font-bold uppercase text-sm hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all"
+            title="Replay Tutorial"
+          >
+            <HelpCircle size={16} />
+            Tutorial
+          </button>
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -256,53 +272,6 @@ export default function Home() {
               >
                 Start Puzzle
               </button>
-
-              <button 
-                onClick={() => {
-                  if (!selectedImage) {
-                    // Use a placeholder if no image selected
-                    const img = new Image();
-                    img.onload = () => {
-                      setSelectedImage(img);
-                      setRows(3);
-                      setCols(3);
-                      setCutStyle('classic');
-                      
-                      // Need to wait for state update, so we'll just force start here
-                      const newConfig: PuzzleConfig = {
-                        image: img,
-                        rows: 3,
-                        cols: 3,
-                        cutStyle: 'classic',
-                        seed: 12345, // Fixed seed for reproducibility
-                        rotationEnabled: false
-                      };
-                      setConfig(newConfig);
-                      setActivePuzzleId(undefined);
-                      setIsPlaying(true);
-                    };
-                    img.src = '/images/hero-bg.png'; // Use existing asset
-                  } else {
-                    setRows(3);
-                    setCols(3);
-                    setCutStyle('classic');
-                    const newConfig: PuzzleConfig = {
-                      image: selectedImage,
-                      rows: 3,
-                      cols: 3,
-                      cutStyle: 'classic',
-                      seed: 12345, // Fixed seed for reproducibility
-                      rotationEnabled: false
-                    };
-                    setConfig(newConfig);
-                    setActivePuzzleId(undefined);
-                    setIsPlaying(true);
-                  }
-                }}
-                className="w-full bg-yellow-400 text-black border-2 border-black py-2 font-bold uppercase hover:bg-yellow-500 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] active:translate-y-[2px] active:shadow-none transition-all"
-              >
-                Test: Golden 3x3 (Classic)
-              </button>
             </div>
           </section>
 
@@ -312,52 +281,92 @@ export default function Home() {
               Library
             </div>
             
-            <h2 className="text-3xl font-bold mb-6 uppercase">Saved Games</h2>
+            <h2 className="text-3xl font-bold mb-6 uppercase">Your Puzzles</h2>
             
-            <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+            {/* Resume Last Puzzle Button */}
+            {lastPuzzle && (
+              <div className="mb-6">
+                <button 
+                  onClick={() => handleResume(lastPuzzle)}
+                  className="w-full neo-btn py-4 text-xl bg-primary text-white border-2 border-black hover:bg-primary/90 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] transition-all"
+                >
+                  <div className="flex items-center justify-center gap-3">
+                    <Play size={24} />
+                    <div className="text-left">
+                      <div className="font-bold">Resume Last Puzzle</div>
+                      <div className="text-sm opacity-90">{calculateProgress(lastPuzzle)}% • {formatLastPlayed(lastPuzzle.updatedAt)}</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
+            
+            {/* Puzzle Gallery Grid */}
+            <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
               {savedPuzzles.length === 0 ? (
                 <div className="text-center py-12 text-gray-400 font-bold uppercase">
                   No saved puzzles yet
                 </div>
               ) : (
-                savedPuzzles.map(puzzle => (
-                  <div key={puzzle.id} className="border-2 border-black p-2 flex gap-4 items-center hover:bg-gray-50 transition-colors group">
-                    <div className="w-20 h-20 bg-gray-200 border-2 border-black shrink-0 overflow-hidden">
-                      {/* Thumbnail would go here */}
-                      <div className="w-full h-full flex items-center justify-center text-gray-400">
-                        <ImageIcon size={24} />
+                savedPuzzles.map(puzzle => {
+                  const progress = calculateProgress(puzzle);
+                  const isComplete = puzzle.gameState.isComplete;
+                  
+                  return (
+                    <div key={puzzle.id} className="border-2 border-black p-3 flex gap-4 items-center hover:bg-gray-50 transition-colors group cursor-pointer">
+                      <div className="w-16 h-16 bg-gray-200 border-2 border-black shrink-0 overflow-hidden">
+                        <img 
+                          src={URL.createObjectURL(puzzle.thumbnail)} 
+                          alt="Puzzle thumbnail"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            // Fallback to icon if thumbnail fails to load
+                            e.currentTarget.style.display = 'none';
+                            e.currentTarget.nextElementSibling!.classList.remove('hidden');
+                          }}
+                        />
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 hidden">
+                          <ImageIcon size={20} />
+                        </div>
+                      </div>
+                      
+                      <div className="flex-1 min-w-0" onClick={() => handleResume(puzzle)}>
+                        <h3 className="font-bold truncate text-sm">{puzzle.name}</h3>
+                        <p className="text-xs text-gray-500 font-mono">
+                          {formatLastPlayed(puzzle.updatedAt)} • {puzzle.serializedConfig.rows}×{puzzle.serializedConfig.cols}
+                        </p>
+                        <div className="mt-2 flex gap-2 items-center">
+                          <div className="flex-1 bg-gray-200 border border-black h-2 relative overflow-hidden">
+                            <div 
+                              className={`h-full transition-all ${isComplete ? 'bg-green-500' : 'bg-primary'}`}
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-bold min-w-[3rem] text-right">
+                            {isComplete ? '✓ Done' : `${progress}%`}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleResume(puzzle); }}
+                          className="p-1.5 bg-primary text-white border border-black hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] text-xs"
+                          title="Play"
+                        >
+                          <Play size={12} />
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleDelete(puzzle.id!); }}
+                          className="p-1.5 bg-destructive text-white border border-black hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] text-xs"
+                          title="Delete"
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold truncate">{puzzle.name}</h3>
-                      <p className="text-xs text-gray-500 font-mono">
-                        {new Date(puzzle.updatedAt).toLocaleDateString()} • {puzzle.serializedConfig.cutStyle}
-                      </p>
-                      <div className="mt-1 flex gap-2">
-                        <span className="text-xs bg-secondary px-1 border border-black font-bold">
-                          {Math.floor(puzzle.gameState.elapsedTime / 60)}m
-                        </span>
-                        <span className="text-xs bg-gray-200 px-1 border border-black font-bold">
-                          {Math.round((Object.keys(puzzle.gameState.groups).length / Object.keys(puzzle.gameState.pieces).length) * 100)}%
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button 
-                        onClick={() => handleResume(puzzle)}
-                        className="p-2 bg-primary text-white border-2 border-black hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                      >
-                        <Play size={16} />
-                      </button>
-                      <button 
-                        onClick={() => handleDelete(puzzle.id!)}
-                        className="p-2 bg-destructive text-white border-2 border-black hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </section>
@@ -367,7 +376,20 @@ export default function Home() {
         <section className="mt-12">
           <h3 className="text-2xl font-bold mb-4 uppercase">Quick Start</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {['/images/sample-landscape.jpg', '/images/sample-cyberpunk.jpg', '/images/sample-animal.jpg', '/images/hero-bg.png'].map((src, i) => (
+            {[
+              '/images/sample-landscape.jpg',
+              '/images/sample-cyberpunk.jpg',
+              '/images/sample-animal.jpg',
+              '/images/hero-bg.png',
+              '/images/old-oak.png',
+              '/images/US-flag.png',
+              '/images/alien-planet.png',
+              '/images/flowers.png',
+              '/images/mountain-lake.png',
+              '/images/newspaper-maze.png',
+              '/images/heart-diagram.png',
+              '/images/fungi-beauty.png'
+            ].map((src, i) => (
               <button 
                 key={i}
                 onClick={() => {

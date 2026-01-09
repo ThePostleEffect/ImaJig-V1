@@ -28,13 +28,26 @@ export interface SavedPuzzle {
   };
 }
 
+export interface AppSettings {
+  id?: number;
+  key: string;
+  value: string;
+}
+
 class ImaJigDB extends Dexie {
   puzzles!: Table<SavedPuzzle, number>;
+  settings!: Table<AppSettings, number>;
 
   constructor() {
     super('ImaJigDB');
     this.version(1).stores({
       puzzles: '++id, name, createdAt, updatedAt',
+    });
+    
+    // Add settings table in version 2
+    this.version(2).stores({
+      puzzles: '++id, name, createdAt, updatedAt',
+      settings: '++id, key, value',
     });
   }
 }
@@ -94,7 +107,12 @@ export async function savePuzzle(
     }
   };
 
-  return await db.puzzles.put(puzzle);
+  const puzzleId = await db.puzzles.put(puzzle);
+  
+  // Update last puzzle ID setting
+  await setSetting('lastPuzzleId', puzzleId.toString());
+  
+  return puzzleId;
 }
 
 export async function loadPuzzle(id: number) {
@@ -109,4 +127,66 @@ export async function deletePuzzle(id: number) {
 
 export async function listPuzzles() {
   return await db.puzzles.orderBy('updatedAt').reverse().toArray();
+}
+
+// App Settings helpers
+export async function getSetting(key: string): Promise<string | null> {
+  try {
+    const setting = await db.settings.where('key').equals(key).first();
+    return setting?.value || null;
+  } catch (error) {
+    console.warn('Failed to get setting:', error);
+    return null;
+  }
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  try {
+    const existing = await db.settings.where('key').equals(key).first();
+    if (existing) {
+      await db.settings.update(existing.id!, { value });
+    } else {
+      await db.settings.add({ key, value });
+    }
+  } catch (error) {
+    console.warn('Failed to set setting:', error);
+  }
+}
+
+// Helper functions for puzzle management
+export async function getLastPuzzle(): Promise<SavedPuzzle | null> {
+  try {
+    const lastPuzzleId = await getSetting('lastPuzzleId');
+    if (!lastPuzzleId) return null;
+    
+    const puzzle = await db.puzzles.get(parseInt(lastPuzzleId));
+    return puzzle || null;
+  } catch (error) {
+    console.warn('Failed to get last puzzle:', error);
+    return null;
+  }
+}
+
+export function calculateProgress(puzzle: SavedPuzzle): number {
+  if (puzzle.gameState.isComplete) return 100;
+  
+  const totalPieces = puzzle.serializedConfig.rows * puzzle.serializedConfig.cols;
+  const lockedPieces = Object.values(puzzle.gameState.pieces).filter(p => p.isLocked).length;
+  
+  return Math.round((lockedPieces / totalPieces) * 100);
+}
+
+export function formatLastPlayed(timestamp: number): string {
+  const now = Date.now();
+  const diff = now - timestamp;
+  const minutes = Math.floor(diff / (1000 * 60));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  
+  return new Date(timestamp).toLocaleDateString();
 }
