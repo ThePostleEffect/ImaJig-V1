@@ -23,11 +23,29 @@ async function startServer() {
     res.sendFile(path.join(staticPath, "index.html"));
   });
 
-  const port = process.env.PORT || 3000;
+  const basePort = Number(process.env.PORT) || 3000;
+  const maxAttempts = 10;
 
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
+  const listenWithFallback = (port: number, attemptsLeft: number) => {
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE" && attemptsLeft > 0) {
+        const nextPort = port + 1;
+        console.warn(`Port ${port} in use, trying ${nextPort}...`);
+        listenWithFallback(nextPort, attemptsLeft - 1);
+        return;
+      }
+      throw err;
+    });
+
+    server.listen(port, () => {
+      console.log(`Server running on http://localhost:${port}/`);
+      if (port !== basePort) {
+        console.log(`Set PORT to choose a specific port (e.g. PORT=3000).`);
+      }
+    });
+  };
+
+  listenWithFallback(basePort, maxAttempts);
 }
 
 startServer().catch(console.error);

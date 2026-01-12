@@ -1,8 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 import { PuzzleConfig, GameState } from '../engine/types';
 import { savePuzzle, listPuzzles, loadPuzzle, SavedPuzzle, deletePuzzle, getLastPuzzle, calculateProgress, formatLastPlayed } from '../storage/db';
 import { Trash2, Play, Upload, Image as ImageIcon, HelpCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from '@/components/ui/alert-dialog';
 
 export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => void }) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -18,6 +29,9 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
   const [cutStyle, setCutStyle] = useState<'classic' | 'retro' | 'shapes'>('classic');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard' | 'custom'>('easy');
   const [rotationEnabled, setRotationEnabled] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Update rows/cols/rotation when difficulty changes
   useEffect(() => {
@@ -110,15 +124,21 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
       activePuzzleId
     );
     loadSavedPuzzles();
-    // Don't exit, just notify?
-    alert('Saved!');
+    toast.success('Puzzle saved');
   };
 
-  const handleDelete = async (id: number) => {
-    if (confirm('Delete this puzzle?')) {
-      await deletePuzzle(id);
-      loadSavedPuzzles();
-    }
+  const requestDelete = (id: number) => {
+    setPendingDeleteId(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (pendingDeleteId == null) return;
+    await deletePuzzle(pendingDeleteId);
+    setPendingDeleteId(null);
+    setDeleteDialogOpen(false);
+    loadSavedPuzzles();
+    toast.success('Puzzle deleted');
   };
 
   if (isPlaying && config) {
@@ -161,7 +181,7 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* New Puzzle Section */}
-          <section className="neo-card p-6 bg-white relative overflow-hidden">
+          <section id="create" className="neo-card p-6 bg-white relative overflow-hidden">
             <div className="absolute top-0 right-0 bg-secondary px-4 py-1 border-l-2 border-b-2 border-black font-bold uppercase text-sm">
               New Game
             </div>
@@ -175,6 +195,7 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
                   type="file" 
                   accept="image/*" 
                   onChange={handleImageUpload}
+                  ref={fileInputRef}
                   className="absolute inset-0 opacity-0 cursor-pointer"
                 />
                 {selectedImage ? (
@@ -304,8 +325,20 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
             {/* Puzzle Gallery Grid */}
             <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
               {savedPuzzles.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 font-bold uppercase">
-                  No saved puzzles yet
+                <div className="text-center py-12 text-gray-500 font-bold uppercase space-y-4">
+                  <div>No saved puzzles yet</div>
+                  <div className="text-xs font-mono text-gray-400 normal-case">
+                    Start a puzzle and it will appear here for quick resume.
+                  </div>
+                  <button
+                    onClick={() => {
+                      document.getElementById('create')?.scrollIntoView({ behavior: 'smooth' });
+                      fileInputRef.current?.click();
+                    }}
+                    className="neo-btn px-4 py-2 text-xs"
+                  >
+                    Choose an Image
+                  </button>
                 </div>
               ) : (
                 savedPuzzles.map(puzzle => {
@@ -357,7 +390,7 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
                           <Play size={12} />
                         </button>
                         <button 
-                          onClick={(e) => { e.stopPropagation(); handleDelete(puzzle.id!); }}
+                          onClick={(e) => { e.stopPropagation(); requestDelete(puzzle.id!); }}
                           className="p-1.5 bg-destructive text-white border border-black hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] text-xs"
                           title="Delete"
                         >
@@ -406,6 +439,25 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
           </div>
         </section>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this puzzle?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDeleteId(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteConfirm}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

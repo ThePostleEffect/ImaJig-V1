@@ -470,8 +470,11 @@ export const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ config, onExit, onSave
           };
           
           // Enable pointer capture for smoother dragging
-          if (event?.target && 'setPointerCapture' in event.target && event.pointerId !== undefined) {
-            (event.target as Element).setPointerCapture(event.pointerId);
+          if (event && 'pointerId' in event) {
+            const target = event.target;
+            if (target && 'setPointerCapture' in target) {
+              (target as Element).setPointerCapture(event.pointerId);
+            }
           }
         } else {
           cameraRef.current.pan(dx, dy);
