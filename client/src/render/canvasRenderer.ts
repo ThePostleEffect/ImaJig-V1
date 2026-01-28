@@ -347,7 +347,9 @@ export class CanvasRenderer {
     ctx.fillRect(0, 0, puzzleW, puzzleH);
 
     // Sort pieces by zIndex (and groups)
-    const pieces = Object.values(gameState.pieces).sort((a, b) => {
+    const pieces = Object.values(gameState.pieces)
+      .filter(p => !p.inTray)
+      .sort((a, b) => {
       if (a.isLocked !== b.isLocked) return a.isLocked ? -1 : 1; // Locked pieces at bottom
       return a.zIndex - b.zIndex;
     });

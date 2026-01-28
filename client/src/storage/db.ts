@@ -68,7 +68,8 @@ export async function savePuzzle(
       currentPose: p.currentPose,
       groupId: p.groupId,
       isLocked: p.isLocked,
-      zIndex: p.zIndex
+      zIndex: p.zIndex,
+      inTray: p.inTray
     };
   });
 

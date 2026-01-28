@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { PuzzleBoard } from '../components/PuzzleBoard';
 import { PuzzleConfig, GameState } from '../engine/types';
-import { savePuzzle, listPuzzles, loadPuzzle, SavedPuzzle, deletePuzzle, getLastPuzzle, calculateProgress, formatLastPlayed } from '../storage/db';
+import { PuzzleGenerator } from '../engine/generator';
+import { savePuzzle, listPuzzles, SavedPuzzle, deletePuzzle, getLastPuzzle, calculateProgress, formatLastPlayed } from '../storage/db';
 import { Trash2, Play, Upload, Image as ImageIcon, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -21,6 +22,7 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
   const [savedPuzzles, setSavedPuzzles] = useState<SavedPuzzle[]>([]);
   const [lastPuzzle, setLastPuzzle] = useState<SavedPuzzle | null>(null);
   const [activePuzzleId, setActivePuzzleId] = useState<number | undefined>(undefined);
+  const [initialState, setInitialState] = useState<GameState | undefined>(undefined);
   
   // Config State
   const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
@@ -28,25 +30,21 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
   const [cols, setCols] = useState(5);
   const [cutStyle, setCutStyle] = useState<'classic' | 'retro' | 'shapes'>('classic');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard' | 'custom'>('easy');
-  const [rotationEnabled, setRotationEnabled] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Update rows/cols/rotation when difficulty changes
+  // Update rows/cols when difficulty changes
   useEffect(() => {
     if (difficulty === 'easy') {
       setRows(5);
       setCols(5);
-      setRotationEnabled(false);
     } else if (difficulty === 'medium') {
       setRows(10);
       setCols(10);
-      setRotationEnabled(false);
     } else if (difficulty === 'hard') {
       setRows(15);
       setCols(15);
-      setRotationEnabled(true);
     }
   }, [difficulty]);
 
@@ -84,11 +82,12 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
       cols,
       cutStyle,
       seed: Date.now(),
-      rotationEnabled
+      rotationEnabled: false
     };
     
     setConfig(newConfig);
     setActivePuzzleId(undefined);
+    setInitialState(undefined);
     setIsPlaying(true);
   };
 
@@ -106,10 +105,38 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
       cols: saved.serializedConfig.cols,
       cutStyle: saved.serializedConfig.cutStyle as any,
       seed: saved.serializedConfig.seed,
-      rotationEnabled: saved.serializedConfig.rotationEnabled || false
+      rotationEnabled: false
     };
     
+    const generator = new PuzzleGenerator();
+    const generated = await generator.generate(restoredConfig);
+    const savedPieces = saved.gameState?.pieces || {};
+
+    Object.entries(savedPieces).forEach(([id, savedPiece]) => {
+      const piece = generated.pieces[id];
+      if (!piece) return;
+      if (savedPiece.currentPose) {
+        piece.currentPose = { ...savedPiece.currentPose, rotation: 0 };
+      } else {
+        piece.currentPose.rotation = 0;
+      }
+      piece.correctPose.rotation = 0;
+      if (typeof savedPiece.groupId === 'string') piece.groupId = savedPiece.groupId;
+      if (typeof savedPiece.isLocked === 'boolean') piece.isLocked = savedPiece.isLocked;
+      if (typeof savedPiece.zIndex === 'number') piece.zIndex = savedPiece.zIndex;
+      if (typeof savedPiece.inTray === 'boolean') piece.inTray = savedPiece.inTray;
+    });
+
+    if (saved.gameState?.groups) generated.groups = saved.gameState.groups;
+    if (typeof saved.gameState?.elapsedTime === 'number') generated.elapsedTime = saved.gameState.elapsedTime;
+    if (typeof saved.gameState?.moveCount === 'number') generated.moveCount = saved.gameState.moveCount;
+    if (typeof saved.gameState?.isComplete === 'boolean') generated.isComplete = saved.gameState.isComplete;
+    if (saved.gameState?.pan) generated.pan = saved.gameState.pan;
+    if (typeof saved.gameState?.zoom === 'number') generated.scale = saved.gameState.zoom;
+    generated.startTime = Date.now();
+
     setConfig(restoredConfig);
+    setInitialState(generated);
     setActivePuzzleId(saved.id);
     setIsPlaying(true);
   };
@@ -149,8 +176,10 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
         onExit={() => {
           setIsPlaying(false);
           setConfig(null);
+          setInitialState(undefined);
           loadSavedPuzzles();
         }} 
+        initialState={initialState}
       />
     );
   }
@@ -246,24 +275,15 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
                         />
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        id="rotation"
-                        checked={rotationEnabled}
-                        onChange={e => setRotationEnabled(e.target.checked)}
-                        className="w-5 h-5 border-2 border-black rounded-none accent-primary"
-                      />
-                      <label htmlFor="rotation" className="font-bold uppercase text-xs cursor-pointer">Enable Rotation</label>
-                    </div>
+
                   </div>
                 )}
                 
                 {difficulty !== 'custom' && (
                   <div className="text-xs font-mono text-gray-500 mb-4">
-                    {difficulty === 'easy' && '25 Pieces • No Rotation'}
-                    {difficulty === 'medium' && '100 Pieces • No Rotation'}
-                    {difficulty === 'hard' && '225 Pieces • Rotation Enabled'}
+                    {difficulty === 'easy' && '25 Pieces'}
+                    {difficulty === 'medium' && '100 Pieces'}
+                    {difficulty === 'hard' && '225 Pieces'}
                   </div>
                 )}
               </div>
@@ -461,3 +481,4 @@ export default function Home({ onReplayTutorial }: { onReplayTutorial?: () => vo
     </div>
   );
 }
+

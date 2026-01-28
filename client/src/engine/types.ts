@@ -37,6 +37,7 @@ export interface Piece {
   groupId: string; // ID of the connected cluster this piece belongs to
   zIndex: number;
   isLocked: boolean; // True if part of a completed group or locked in place
+  inTray?: boolean; // True if the piece is stored in the bottom tray
   border?: { top: boolean; right: boolean; bottom: boolean; left: boolean; };
 }
 
